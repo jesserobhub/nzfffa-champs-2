@@ -1,0 +1,32 @@
+name: Weekly NZFFFA Recap
+
+on:
+  schedule:
+    # Tuesday 20:00 UTC == Wednesday 8:00 NZDT
+    - cron: "0 20 * * TUE"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests reportlab
+
+      - name: Generate PDF
+        run: python generate_recap.py
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NZFFFA-Weekly-Recap
+          path: "*.pdf"
+          if-no-files-found: error
