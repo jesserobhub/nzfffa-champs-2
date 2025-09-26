@@ -1,6 +1,6 @@
 # NZFFFA weekly recap PDF generator (Sleeper -> PDF)
 # Features: Standings, SOS (opponents' avg points), All-Play%, Expected Wins, Luck (with 🍀/😬/⚖️),
-#           League Average SOS row, rotating praise/roast banter, and highlights.
+#           League Average SOS row, rotating praise/roast banter, highlights, and a "League Story So Far" paragraph.
 #
 # Deps: pip install requests reportlab
 
@@ -109,6 +109,8 @@ def build_standings(pf, pa, w, l):
     rows.sort(key=lambda r: (r[1], r[3]), reverse=True)
     return rows
 
+from reportlab.platypus import Paragraph  # ensure Paragraph is available here
+
 def build_sos_luck_rows(pf, pa, w, l, gp, allplay_pct):
     rows = []
     sos_vals = []
@@ -148,10 +150,13 @@ def derive_maps(standings, sos_luck_rows):
     for r in sos_luck_rows:
         t = r[0]
         if t == "League Avg": continue
-        # r[8] is a Paragraph; extract numeric via HTML in its text representation
-        m = re.search(r"([+-]?\d+\.\d+|[+-]?\d+)", str(r[8].getPlainText()) if hasattr(r[8],'getPlainText') else str(r[8]))
+        # r[8] is a Paragraph; extract numeric via its plain text
+        val = r[8].getPlainText() if hasattr(r[8], "getPlainText") else str(r[8])
+        m = re.search(r"([+-]?\d+\.\d+|[+-]?\d+)", val)
         luck_map[t] = float(m.group(1)) if m else 0.0
-    return teams, wins_map, loss_map, sos_map, luck_map
+    # PF map for convenience
+    pf_map = {r[0]: r[3] for r in standings}
+    return teams, wins_map, loss_map, sos_map, luck_map, pf_map
 
 # ---- Banter pools (5 each) ----
 PRAISES_TOP = [
@@ -209,9 +214,56 @@ def picks_and_pans(weekly_games):
         closest.append((week, cg)); blowouts.append((week, bg))
     return closest, blowouts
 
+# ---------- NEW: Build a one-paragraph story ----------
+def build_story(weeks, standings, sos_map, luck_map, pf_map, closest, blowouts):
+    # leaders & laggards by Wins then PF (standings already sorted that way)
+    top_team = standings[0][0] if standings else ""
+    bottom_team = standings[-1][0] if standings else ""
+
+    # PF extremes
+    pf_leader = max(pf_map, key=pf_map.get) if pf_map else ""
+    pf_trailer = min(pf_map, key=pf_map.get) if pf_map else ""
+
+    # SOS extremes
+    teams = [t for t in sos_map if sos_map[t] is not None]
+    easiest = min(teams, key=lambda t: sos_map[t]) if teams else ""
+    hardest = max(teams, key=lambda t: sos_map[t]) if teams else ""
+
+    # Luck extremes (positive/negative)
+    pos = [t for t,v in luck_map.items() if v > 0]
+    neg = [t for t,v in luck_map.items() if v < 0]
+    luckiest = max(pos, key=lambda t: luck_map[t]) if pos else ""
+    unluckiest = min(neg, key=lambda t: luck_map[t]) if neg else ""
+
+    # Game highlights
+    if closest:
+        w,(ta,sa,tb,sb,margin,_) = min(closest, key=lambda x: x[1][4])
+        close_line = f"Closest finish came in Week {w}: {ta} {sa:.2f} over {tb} {sb:.2f} by {margin:.2f}."
+    else:
+        close_line = "No nail-biters to report."
+
+    if blowouts:
+        w,(ta,sa,tb,sb,margin,_) = max(blowouts, key=lambda x: x[1][4])
+        blowout_line = f"Biggest beatdown was Week {w}: {ta} {sa:.2f} over {tb} {sb:.2f} by {margin:.2f}."
+    else:
+        blowout_line = "No blowouts either — this league keeps it polite."
+
+    # Compose Burgundy-style paragraph
+    lines = [
+        f"Weeks {min(weeks)}–{max(weeks)} are in the books, and {top_team} currently rules the roost while {bottom_team} keeps the basement warm.",
+        f"Points factory of the league? {pf_leader}. Points famine? {pf_trailer}.",
+        f"Schedule watch: {easiest} has feasted on a cupcake menu, while {hardest} has been forced through a murderer’s row.",
+        f"Lady Luck’s favorite child is {luckiest} ({luck_map.get(luckiest,0):+.2f}), and her sworn enemy is {unluckiest} ({luck_map.get(unluckiest,0):+.2f}).",
+        close_line,
+        blowout_line,
+        "Adjust your expectations, set your alarms for waivers, and as always — stay classy."
+    ]
+    # Filter out any blank parts if data missing
+    return " ".join([s for s in lines if s and "  " not in s])
+
 def write_pdf(filename: str, league_name: str, weeks: List[int],
               standings, sos_luck_rows, closest, blowouts,
-              undefeated, winless, luckiest, unluckiest, easiest, hardest, sos_map, luck_map):
+              undefeated, winless, luckiest, unluckiest, easiest, hardest, sos_map, luck_map, pf_map):
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     H1 = ParagraphStyle("H1", parent=styles["Heading1"], alignment=1)
@@ -295,7 +347,15 @@ def write_pdf(filename: str, league_name: str, weeks: List[int],
         if winner == tb: ta,tb,sa,sb = tb,ta,sb,sa
         story.append(Paragraph(f"Week {week}: {ta} {sa:.2f} over {tb} {sb:.2f} (margin {abs(sa-sb):.2f})", styles["Normal"]))
 
+    story.append(Spacer(1, 12))
+
+    # ---------- NEW: League Story So Far ----------
+    story.append(Paragraph("League Story So Far", styles["Heading2"]))
+    story_text = build_story(weeks, standings, sos_map, luck_map, pf_map, closest, blowouts)
+    story.append(Paragraph(story_text, styles["BodyText"]))
     story.append(Spacer(1, 10))
+
+    # Sign-off
     story.append(Paragraph("Commissioner’s Closing Words", styles["Heading2"]))
     story.append(Paragraph(
         "Undefeateds, keep strutting. Winless, keep praying. Middle pack, every start/sit could swing your season. Stay classy.",
@@ -310,7 +370,7 @@ def main():
     standings      = build_standings(pf, pa, w, l)
     allplay_pct    = compute_all_play(weekly_scores)
     sos_luck_rows  = build_sos_luck_rows(pf, pa, w, l, gp, allplay_pct)
-    teams, wins_map, loss_map, sos_map, luck_map = derive_maps(standings, sos_luck_rows)
+    teams, wins_map, loss_map, sos_map, luck_map, pf_map = derive_maps(standings, sos_luck_rows)
 
     # categories
     undefeated = [t for t in teams if wins_map[t] > 0 and loss_map[t] == 0]
@@ -332,7 +392,7 @@ def main():
     write_pdf(
         out, league.get("name", TITLE_PREFIX), weeks,
         standings, sos_luck_rows, closest, blowouts,
-        undefeated, winless, luckiest, unluckiest, easiest, hardest, sos_map, luck_map
+        undefeated, winless, luckiest, unluckiest, easiest, hardest, sos_map, luck_map, pf_map
     )
     print(f"Generated: {out}")
 
