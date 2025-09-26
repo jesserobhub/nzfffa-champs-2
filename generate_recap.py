@@ -1,12 +1,12 @@
 # NZFFFA weekly recap PDF generator (Sleeper -> PDF)
 # Features: Standings, SOS (opponents' avg points), All-Play%, Expected Wins, Luck (with 🍀/😬/⚖️),
-#           League Average SOS row, and rotating praise/roast banter.
+#           League Average SOS row, rotating praise/roast banter, and highlights.
 #
 # Deps: pip install requests reportlab
 
 import os, re, random
 from statistics import mean
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import requests
 
 from reportlab.lib.pagesizes import letter
@@ -80,11 +80,10 @@ def compute_core(roster_to_team: Dict[int,str], weeks: List[int], weeks_data: Di
             pa[ta] += sb; pa[tb] += sa
             gp[ta] += 1; gp[tb] += 1
 
-            winner = ta if sa > sb else tb
-            if winner == ta:
-                w[ta] += 1; l[tb] += 1
+            if sa > sb:
+                w[ta] += 1; l[tb] += 1; winner = ta
             else:
-                w[tb] += 1; l[ta] += 1
+                w[tb] += 1; l[ta] += 1; winner = tb
 
             weekly_games[week].append((ta, sa, tb, sb, abs(sa - sb), winner))
 
@@ -104,18 +103,16 @@ def compute_all_play(weekly_scores: Dict[int, Dict[str, float]]) -> Dict[str, fl
     return {t: ap_wins[t] / ap_weeks[t] for t in ap_wins}
 
 def build_standings(pf, pa, w, l):
-    rows = [[t, w.get(t,0), l.get(t,0),
-             round(pf[t],2), round(pa[t],2), round(pf[t]-pa[t],2)]
+    rows = [[t, w.get(t,0), l.get(t,0), round(pf[t],2), round(pa[t],2), round(pf[t]-pa[t],2)]
             for t in pf.keys()]
-    # Sort by PF (index 3) descending
-    rows.sort(key=lambda r: r[3], reverse=True)
+    # Sort by Wins (index 1) then PF (index 3), both descending
+    rows.sort(key=lambda r: (r[1], r[3]), reverse=True)
     return rows
-
-from reportlab.platypus import Paragraph  # already imported earlier
 
 def build_sos_luck_rows(pf, pa, w, l, gp, allplay_pct):
     rows = []
     sos_vals = []
+    styles = getSampleStyleSheet()
     for t in pf.keys():
         games = gp.get(t, 0) or 1
         sos   = pa.get(t, 0.0) / games
@@ -124,27 +121,22 @@ def build_sos_luck_rows(pf, pa, w, l, gp, allplay_pct):
         luck  = w.get(t, 0) - exp_w
         sos_vals.append(sos)
 
-        # Luck badge (Paragraph so ReportLab renders it)
-        if luck > 0.5:
-            badge_html = f"<font color='green'>🍀 {luck:.2f}</font>"
-        elif luck < -0.5:
-            badge_html = f"<font color='red'>😬 {luck:.2f}</font>"
-        else:
-            badge_html = f"<font color='gray'>⚖️ {luck:.2f}</font>"
-        badge = Paragraph(badge_html, getSampleStyleSheet()["BodyText"])
+        # Luck badge (as Paragraph so ReportLab renders the color + emoji)
+        if luck > 0.5:   badge_html = f"<font color='green'>🍀 {luck:.2f}</font>"
+        elif luck < -0.5:badge_html = f"<font color='red'>😬 {luck:.2f}</font>"
+        else:            badge_html = f"<font color='gray'>⚖️ {luck:.2f}</font>"
+        badge = Paragraph(badge_html, styles["BodyText"])
 
-        rows.append([t, w.get(t,0), l.get(t,0),
-                     round(pf[t],2), round(pa[t],2),
+        rows.append([t, w.get(t,0), l.get(t,0), round(pf[t],2), round(pa[t],2),
                      round(sos,2), round(ap,3), round(exp_w,2), badge])
 
     avg_sos = mean(sos_vals) if sos_vals else 0.0
     avg_row = ["League Avg","","","-","-", round(avg_sos,2), "-", "-", "-"]
 
-    # Sort non-average rows by PF (index 3) descending, then append League Avg
-    rows.sort(key=lambda r: r[3], reverse=True)
+    # Sort non-average rows by Wins then PF, descending; then append League Avg
+    rows.sort(key=lambda r: (r[1], r[3]), reverse=True)
     rows.append(avg_row)
     return rows
-
 
 def derive_maps(standings, sos_luck_rows):
     teams     = [r[0] for r in standings]
@@ -156,11 +148,12 @@ def derive_maps(standings, sos_luck_rows):
     for r in sos_luck_rows:
         t = r[0]
         if t == "League Avg": continue
-        m = re.search(r"([+-]?\d+\.\d+|[+-]?\d+)", str(r[8]))
+        # r[8] is a Paragraph; extract numeric via HTML in its text representation
+        m = re.search(r"([+-]?\d+\.\d+|[+-]?\d+)", str(r[8].getPlainText()) if hasattr(r[8],'getPlainText') else str(r[8]))
         luck_map[t] = float(m.group(1)) if m else 0.0
     return teams, wins_map, loss_map, sos_map, luck_map
 
-# ---- Banter pools (5 lines each) ----
+# ---- Banter pools (5 each) ----
 PRAISES_TOP = [
     "Bow down, peasants. The juggernaut marches on.",
     "Not even Thanos could snap this streak away.",
@@ -227,7 +220,7 @@ def write_pdf(filename: str, league_name: str, weeks: List[int],
     story.append(Paragraph(f"🏈 {league_name} — Weeks {min(weeks)}–{max(weeks)} Recap 🏈", H1))
     story.append(Spacer(1, 8))
 
-    # Banter sections (Ron Burgundy voice)
+    # Banter sections
     if undefeated:
         story.append(Paragraph("Top Dogs (Undefeated)", styles["Heading2"]))
         story.append(Paragraph(", ".join(undefeated), styles["Normal"]))
@@ -322,8 +315,12 @@ def main():
     # categories
     undefeated = [t for t in teams if wins_map[t] > 0 and loss_map[t] == 0]
     winless    = [t for t in teams if wins_map[t] == 0 and loss_map[t] > 0]
-    luckiest   = sorted(luck_map.keys(), key=lambda x: luck_map[x], reverse=True)[:3]
-    unluckiest = sorted(luck_map.keys(), key=lambda x: luck_map[x])[:3]
+
+    # Luckiest = top positive luck; Unluckiest = most negative
+    positives  = [t for t,v in luck_map.items() if v > 0]
+    negatives  = [t for t,v in luck_map.items() if v < 0]
+    luckiest   = sorted(positives,  key=lambda x: luck_map[x], reverse=True)[:3]
+    unluckiest = sorted(negatives,  key=lambda x: luck_map[x])[:3]
 
     non_avg   = [r[0] for r in sos_luck_rows if r[0] != "League Avg"]
     easiest   = sorted(non_avg, key=lambda t: sos_map[t])[:2]
@@ -341,5 +338,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
