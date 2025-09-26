@@ -355,15 +355,6 @@ def write_pdf(filename: str, league_name: str, weeks: List[int],
     story.append(Paragraph(story_text, styles["BodyText"]))
     story.append(Spacer(1, 10))
 
-    # Sign-off
-    story.append(Paragraph("Commissioner’s Closing Words", styles["Heading2"]))
-    story.append(Paragraph(
-        "Undefeateds, keep strutting. Winless, keep praying. Middle pack, every start/sit could swing your season. Stay classy.",
-        styles["Normal"]
-    ))
-
-    doc.build(story)
-
 def main():
     league, roster_to_team, weeks, weeks_data = load_data(LEAGUE_ID)
     pf, pa, w, l, gp, weekly_games, weekly_scores = compute_core(roster_to_team, weeks, weeks_data)
@@ -398,3 +389,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
