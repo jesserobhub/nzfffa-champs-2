@@ -104,9 +104,11 @@ def compute_all_play(weekly_scores: Dict[int, Dict[str, float]]) -> Dict[str, fl
     return {t: ap_wins[t] / ap_weeks[t] for t in ap_wins}
 
 def build_standings(pf, pa, w, l):
-    rows = [[t, w.get(t,0), l.get(t,0), round(pf[t],2), round(pa[t],2), round(pf[t]-pa[t],2)]
+    rows = [[t, w.get(t,0), l.get(t,0),
+             round(pf[t],2), round(pa[t],2), round(pf[t]-pa[t],2)]
             for t in pf.keys()]
-    rows.sort(key=lambda r: (r[1], r[5], r[3]), reverse=True)  # Wins, Diff, PF
+    # Sort by PF (index 3) descending
+    rows.sort(key=lambda r: r[3], reverse=True)
     return rows
 
 from reportlab.platypus import Paragraph  # already imported earlier
@@ -122,31 +124,25 @@ def build_sos_luck_rows(pf, pa, w, l, gp, allplay_pct):
         luck  = w.get(t, 0) - exp_w
         sos_vals.append(sos)
 
-        # build the colored badge (as HTML)…
+        # Luck badge (Paragraph so ReportLab renders it)
         if luck > 0.5:
             badge_html = f"<font color='green'>🍀 {luck:.2f}</font>"
         elif luck < -0.5:
             badge_html = f"<font color='red'>😬 {luck:.2f}</font>"
         else:
             badge_html = f"<font color='gray'>⚖️ {luck:.2f}</font>"
-
-        # …then wrap it in a Paragraph so the table renders it
         badge = Paragraph(badge_html, getSampleStyleSheet()["BodyText"])
 
-        rows.append([
-            t,
-            w.get(t,0),
-            l.get(t,0),
-            round(pf[t],2),
-            round(pa[t],2),
-            round(sos,2),
-            round(ap,3),
-            round(exp_w,2),
-            badge,                      # << Paragraph object, not raw string
-        ])
+        rows.append([t, w.get(t,0), l.get(t,0),
+                     round(pf[t],2), round(pa[t],2),
+                     round(sos,2), round(ap,3), round(exp_w,2), badge])
 
     avg_sos = mean(sos_vals) if sos_vals else 0.0
-    rows.append(["League Avg","","","-","-", round(avg_sos,2), "-", "-", "-"])
+    avg_row = ["League Avg","","","-","-", round(avg_sos,2), "-", "-", "-"]
+
+    # Sort non-average rows by PF (index 3) descending, then append League Avg
+    rows.sort(key=lambda r: r[3], reverse=True)
+    rows.append(avg_row)
     return rows
 
 
@@ -345,4 +341,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
