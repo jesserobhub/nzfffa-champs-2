@@ -109,6 +109,8 @@ def build_standings(pf, pa, w, l):
     rows.sort(key=lambda r: (r[1], r[5], r[3]), reverse=True)  # Wins, Diff, PF
     return rows
 
+from reportlab.platypus import Paragraph  # already imported earlier
+
 def build_sos_luck_rows(pf, pa, w, l, gp, allplay_pct):
     rows = []
     sos_vals = []
@@ -120,16 +122,33 @@ def build_sos_luck_rows(pf, pa, w, l, gp, allplay_pct):
         luck  = w.get(t, 0) - exp_w
         sos_vals.append(sos)
 
-        if luck > 0.5:   badge = f"<font color='green'>🍀 {luck:.2f}</font>"
-        elif luck < -0.5:badge = f"<font color='red'>😬 {luck:.2f}</font>"
-        else:            badge = f"<font color='gray'>⚖️ {luck:.2f}</font>"
+        # build the colored badge (as HTML)…
+        if luck > 0.5:
+            badge_html = f"<font color='green'>🍀 {luck:.2f}</font>"
+        elif luck < -0.5:
+            badge_html = f"<font color='red'>😬 {luck:.2f}</font>"
+        else:
+            badge_html = f"<font color='gray'>⚖️ {luck:.2f}</font>"
 
-        rows.append([t, w.get(t,0), l.get(t,0), round(pf[t],2), round(pa[t],2),
-                     round(sos,2), round(ap,3), round(exp_w,2), badge])
+        # …then wrap it in a Paragraph so the table renders it
+        badge = Paragraph(badge_html, getSampleStyleSheet()["BodyText"])
+
+        rows.append([
+            t,
+            w.get(t,0),
+            l.get(t,0),
+            round(pf[t],2),
+            round(pa[t],2),
+            round(sos,2),
+            round(ap,3),
+            round(exp_w,2),
+            badge,                      # << Paragraph object, not raw string
+        ])
 
     avg_sos = mean(sos_vals) if sos_vals else 0.0
     rows.append(["League Avg","","","-","-", round(avg_sos,2), "-", "-", "-"])
     return rows
+
 
 def derive_maps(standings, sos_luck_rows):
     teams     = [r[0] for r in standings]
@@ -326,3 +345,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
